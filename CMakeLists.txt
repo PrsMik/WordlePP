@@ -30,7 +30,12 @@ set(SOURCES main.cpp
     src/Model/Dictionary/Dictionary.cpp
     src/Model/WordleModel.cpp
     src/View/AssetManager.cpp
-    src/View/GameView.cpp)
+    src/View/GameView.cpp
+    src/View/CharBox.cpp
+    src/View/WordRow.cpp
+    src/View/KeyboardDisplay.cpp
+    src/View/GameLayout.cpp
+    )
 
 set(DATA_DIR "${PROJECT_SOURCE_DIR}/data")
 
@@ -64,3 +69,18 @@ target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3 SDL3_ttf::SDL3_ttf SDL3
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
+
+if(CMAKE_EXPORT_COMPILE_COMMANDS)
+    # Используем команду execute_process, которая будет выполняться на этапе конфигурации
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+                "${CMAKE_BINARY_DIR}/compile_commands.json" 
+                "${CMAKE_SOURCE_DIR}/compile_commands.json"
+        # Убедитесь, что эта команда не блокирует конфигурацию
+        RESULT_VARIABLE COPY_STATUS
+        # ERROR_VARIABLE COPY_ERROR # Можно использовать для отладки
+    )
+    if(NOT COPY_STATUS EQUAL 0)
+        message(STATUS "Не удалось скопировать compile_commands.json в ${CMAKE_SOURCE_DIR}")
+    endif()
+endif()

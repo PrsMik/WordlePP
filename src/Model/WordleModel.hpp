@@ -19,15 +19,17 @@ public:
 
     void startNewGame() override;
 
-    void checkInputWord(const std::string &inputWord) override;
+    void checkInputWord() override;
 
-    bool isValidInput(const std::string &inputWord) override;
+    bool isValidInput() override;
+
+    void modifyCurrentInput(const std::string &input) override;
 
     bool isGameOver() const override;
 
     bool isUserWin() const override;
 
-    [[nodiscard]] const GameStateDTO &getGameState() const override;
+    [[nodiscard]] GameStateDTO &getGameState() override;
 
     ~WordleModel();
 

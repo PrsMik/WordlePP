@@ -1,5 +1,6 @@
 #include "WordleModel.hpp"
 #include "GameState.hpp"
+#include <string>
 #define NOMINMAX
 #include <algorithm>
 #include <format>
@@ -11,77 +12,102 @@ WordleModel::WordleModel(Alphabet::Language _alphabetLanguage,
                          std::unique_ptr<IDictionary> _gameDictionary,
                          int _maxAttempts) : gameLanguage(_alphabetLanguage),
                                              gameDictionary(std::move(_gameDictionary)),
-                                             gameState(_maxAttempts, Alphabet::getLanguageString(gameLanguage),
+                                             gameState(_maxAttempts, Alphabet::getAlphabet(gameLanguage),
                                                        gameDictionary->getRandomWord())
 {
 }
 
 void WordleModel::startNewGame()
 {
-    for (char letter : gameState.currentAlphabet)
-    {
-        gameState.currentAlphabetStatus[letter] = GameStateDTO::LetterStatus::IS_NOT_USED;
-    }
-    gameState.targetWord = gameDictionary->getRandomWord();
+    gameState = GameStateDTO(gameState.maxAttempts,
+                             gameState.currentAlphabet,
+                             gameDictionary->getRandomWord());
 }
 
-void WordleModel::checkInputWord(const std::string &inputWord)
+void WordleModel::checkInputWord()
 {
-    gameState.userGuesses.push_back(inputWord);
-    gameState.lastGuessStatus.clear();
-
-    char letter;
-    std::map<char, std::vector<int>> targetWordLetterIndexes;
-    for (int index = 0; index < gameState.targetWordLength; ++index)
+    std::string tempLastInput;
+    for (auto &let : gameState.currentInputByLetters)
     {
-        letter = gameState.targetWord[index];
-        targetWordLetterIndexes[letter].push_back(index);
+        tempLastInput += let;
+    }
+    gameState.userGuesses.push_back(tempLastInput);
+    gameState.lastGuessStatus.clear();
+    gameState.lastGuessStatus.resize(gameState.targetWordLength);
+
+    std::map<std::string, int> targetLetterCounts;
+    for (const auto &letter : gameState.targetWordByLetters)
+    {
+        targetLetterCounts[letter]++;
     }
 
-    std::vector<int> possibleIndexes;
-    for (int letterIndex = 0; letterIndex < inputWord.size(); ++letterIndex)
+    for (int letterIndex = 0; letterIndex < gameState.currentInputByLetters.size(); ++letterIndex)
     {
-        letter = inputWord[letterIndex];
-        try
-        {
-            possibleIndexes = targetWordLetterIndexes.at(letter);
-            auto iter = std::ranges::find(possibleIndexes, letterIndex);
+        const std::string &currentLetter = gameState.currentInputByLetters[letterIndex];
+        const std::string &targetLetter = gameState.targetWordByLetters[letterIndex];
 
-            if (iter != possibleIndexes.end())
-            {
-                gameState.lastGuessStatus[letter] = GameStateDTO::LetterStatus::IS_IN_PLACE;
-            }
-            else
-            {
-                gameState.lastGuessStatus[letter] = GameStateDTO::LetterStatus::IS_IN_WORD_NOT_IN_PLACE;
-            }
-
-            possibleIndexes.erase(iter);
-            if (possibleIndexes.empty())
-            {
-                targetWordLetterIndexes.erase(letter);
-            }
-        }
-        catch (const std::exception &e)
+        if (currentLetter == targetLetter)
         {
-            gameState.lastGuessStatus[letter] = GameStateDTO::LetterStatus::IS_NOT_IN_WORD;
+            gameState.lastGuessStatus[letterIndex] = {currentLetter,
+                                                      GameStateDTO::LetterStatus::IS_IN_PLACE};
+            targetLetterCounts[currentLetter]--;
         }
-        gameState.currentAlphabetStatus[letter] = std::max(gameState.lastGuessStatus[letter], gameState.currentAlphabetStatus[letter]);
+    }
+
+    for (int letterIndex = 0; letterIndex < gameState.currentInputByLetters.size(); ++letterIndex)
+    {
+        if (gameState.lastGuessStatus[letterIndex].second == GameStateDTO::LetterStatus::IS_IN_PLACE)
+        {
+            gameState.currentAlphabetStatus[gameState.currentInputByLetters[letterIndex]] = std::max(
+                gameState.lastGuessStatus[letterIndex].second,
+                gameState.currentAlphabetStatus[gameState.currentInputByLetters[letterIndex]]);
+            continue;
+        }
+
+        const std::string &currentLetter = gameState.currentInputByLetters[letterIndex];
+
+        if (targetLetterCounts.contains(currentLetter) && targetLetterCounts[currentLetter] > 0)
+        {
+            gameState.lastGuessStatus[letterIndex] = {currentLetter,
+                                                      GameStateDTO::LetterStatus::IS_IN_WORD_NOT_IN_PLACE};
+            targetLetterCounts[currentLetter]--;
+        }
+        else
+        {
+            gameState.lastGuessStatus[letterIndex] = {currentLetter,
+                                                      GameStateDTO::LetterStatus::IS_NOT_IN_WORD};
+        }
+
+        gameState.currentAlphabetStatus[currentLetter] = std::max(
+            gameState.lastGuessStatus[letterIndex].second,
+            gameState.currentAlphabetStatus[currentLetter]);
+    }
+
+    gameState.userGuessesStatuses.push_back(gameState.lastGuessStatus);
+    if (isGameOver())
+    {
+        gameState.isGameFinished = true;
+        gameState.finalMessage = isUserWin() ? gameState.WIN_MESSAGE : gameState.LOSE_MESSAGE;
     }
 }
 
-bool WordleModel::isValidInput(const std::string &inputWord)
+bool WordleModel::isValidInput()
 {
     bool res = false;
-    if (inputWord.size() == gameState.targetWordLength)
+    if (gameState.currentInputByLetters.size() == gameState.targetWordLength)
     {
-        for (char letter : inputWord)
+        for (const auto &currentInputByLetter : gameState.currentInputByLetters)
         {
-            if (!gameState.currentAlphabetStatus.contains(letter))
+            if (!gameState.currentAlphabetStatus.contains(currentInputByLetter))
             {
                 gameState.errorMessage = "Содержатся символы, не входящие в алфавит.";
                 return res;
             }
+        }
+        if (!gameDictionary->isValidWord(gameState.getCurrentInputString()))
+        {
+            gameState.errorMessage = "Такого слова нет в словаре для текущего языка.";
+            return res;
         }
         res = true;
     }
@@ -92,6 +118,11 @@ bool WordleModel::isValidInput(const std::string &inputWord)
     return res;
 }
 
+void WordleModel::modifyCurrentInput(const std::string &input)
+{
+    gameState.setCurrentInput(input);
+}
+
 bool WordleModel::isGameOver() const
 {
     return gameState.userGuesses.size() == gameState.maxAttempts || this->isUserWin();
@@ -99,10 +130,14 @@ bool WordleModel::isGameOver() const
 
 bool WordleModel::isUserWin() const
 {
+    if (gameState.userGuesses.empty())
+    {
+        return false;
+    }
     return gameState.targetWord == gameState.userGuesses.back();
 }
 
-const GameStateDTO &WordleModel::getGameState() const
+GameStateDTO &WordleModel::getGameState()
 {
     return gameState;
 }

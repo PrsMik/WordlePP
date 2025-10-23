@@ -7,13 +7,17 @@
 int main()
 {
 
-    auto lang = Alphabet::Language::ENGLISH;
-    auto wrdLen = 5;
-    auto maxAttempts = 6;
-    auto dict = std::make_unique<Dictionary>(lang, wrdLen);
-    auto model = std::make_unique<WordleModel>(lang, std::move(dict), maxAttempts);
+    const auto LANG = Alphabet::Language::RUSSIAN;
+    const int WORD_LEN = 5;
+    const int MAX_ATTEMPTS = 6;
+    const int WIDTH = 800;
+    const int HEIGHT = 800;
+
+    auto dict = std::make_unique<Dictionary>(LANG, WORD_LEN);
+    auto model = std::make_unique<WordleModel>(LANG, std::move(dict), MAX_ATTEMPTS);
     SDLEngine controller(std::move(model));
-    controller.init("Hello", 800, 800);
+
+    controller.init("Wordle Game", WIDTH, HEIGHT);
     controller.runGameLoop();
     return 0;
 }

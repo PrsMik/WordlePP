@@ -6,7 +6,8 @@
 #include <random>
 #include <string>
 
-Dictionary::Dictionary(Alphabet::Language lang, int wordLength) : pathToDictionary(DATA_DIR "/" + Alphabet::getLanguageString(lang) +
+Dictionary::Dictionary(Alphabet::Language lang, int wordLength) : pathToDictionary(DATA_DIR "/dictionaries/" +
+                                                                                   Alphabet::getLanguageString(lang) +
                                                                                    std::format("_DICTIONARY_{}L.txt", wordLength)),
                                                                   dictionaryFile(pathToDictionary), amountOfWords(0)
 {
@@ -69,6 +70,7 @@ bool Dictionary::isValidWord(const std::string &inputWord)
         {
             if (currentWord == inputWord)
             {
+                dictionaryFile.close();
                 return true;
             }
         }

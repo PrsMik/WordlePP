@@ -15,7 +15,7 @@ public:
 private:
     static inline const std::map<Language, std::string> ALPHABETS{
         {Language::ENGLISH, "qwertyuiopasdfghjklzxcvbnm"},
-        {Language::RUSSIAN, "йцукеёнгшщзхъфывапролджэячсмитьбю"}};
+        {Language::RUSSIAN, "йцукенгшщзхъфывапролджэячсмитьбюё"}};
 
     static inline const std::map<Language, std::string> LANGUAGE_STRINGS{
         {Language::ENGLISH, "ENGLISH"},
