@@ -2,5 +2,4 @@ out/
 .vscode/
 compile_commands.json
 build/
-cmake/
 .cache/

@@ -12,16 +12,16 @@ set(SDLTTF_VENDORED ON)
 set(SDLIMAGE_VENDORED OFF)
 set(SDLMIXER_VENDORED OFF)
 
-# This assumes the SDL source is available in vendored/SDL
+# This assumes the SDL source is available in lib/SDL
 add_subdirectory(lib/SDL EXCLUDE_FROM_ALL)
 
-# This assumes the SDL_ttf source is available in vendored/SDL_ttf
+# This assumes the SDL_ttf source is available in lib/SDL_ttf
 add_subdirectory(lib/SDL_ttf EXCLUDE_FROM_ALL)
 
-# This assumes the SDL_ttf source is available in vendored/SDL_ttf
+# This assumes the SDL_ttf source is available in lib/SDL_ttf
 add_subdirectory(lib/SDL_image EXCLUDE_FROM_ALL)
 
-# This assumes the SDL_ttf source is available in vendored/SDL_ttf
+# This assumes the SDL_ttf source is available in lib/SDL_ttf
 add_subdirectory(lib/SDL_mixer EXCLUDE_FROM_ALL)
 
 set(SOURCES main.cpp
@@ -77,16 +77,33 @@ set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
 include(CPack)
 
 if(CMAKE_EXPORT_COMPILE_COMMANDS)
+    set(COMPILE_COMMANDS_PATH "${CMAKE_BINARY_DIR}/compile_commands.json")
+    set(DESTINATION_PATH "${CMAKE_SOURCE_DIR}/compile_commands.json")
+    
+    # 1. Сначала генерируем файл (он создаётся во время сборки)
     # Используем команду execute_process, которая будет выполняться на этапе конфигурации
     execute_process(
         COMMAND ${CMAKE_COMMAND} -E copy_if_different 
-                "${CMAKE_BINARY_DIR}/compile_commands.json" 
-                "${CMAKE_SOURCE_DIR}/compile_commands.json"
-        # Убедитесь, что эта команда не блокирует конфигурацию
+                "${COMPILE_COMMANDS_PATH}" 
+                "${DESTINATION_PATH}"
         RESULT_VARIABLE COPY_STATUS
         # ERROR_VARIABLE COPY_ERROR # Можно использовать для отладки
     )
     if(NOT COPY_STATUS EQUAL 0)
         message(STATUS "Не удалось скопировать compile_commands.json в ${CMAKE_SOURCE_DIR}")
+    else()
+        # 2. Манипуляция содержимым файла для исправления регистра диска
+        message(STATUS "Исправление регистра диска в ${DESTINATION_PATH} для clangd...")
+        
+        # Читаем содержимое файла в переменную
+        file(READ "${DESTINATION_PATH}" COMPILE_COMMANDS_CONTENT)
+        
+        # Заменяем D: на d:
+        string(REPLACE "D:" "d:" COMPILE_COMMANDS_CONTENT "${COMPILE_COMMANDS_CONTENT}")
+        
+        # Записываем измененное содержимое обратно в файл
+        file(WRITE "${DESTINATION_PATH}" "${COMPILE_COMMANDS_CONTENT}")
+        
+        message(STATUS "Исправление завершено.")
     endif()
 endif()
