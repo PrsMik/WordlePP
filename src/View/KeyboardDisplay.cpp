@@ -32,23 +32,21 @@ std::vector<std::string> createKeyboardRows(const std::string &alphabet)
     return newRows;
 }
 
-char toUpper(char c)
-{
-    return (c >= 'a' && c <= 'z') ? c - ('a' - 'A') : c;
-}
-
 KeyboardDisplay::KeyboardDisplay(float _startX, float _startY, float _keyWidth, float _keyHeight,
                                  float _rowSpacing, float _keySpacing, const TTF_Font *_font, SDL_Renderer *_renderer,
-                                 const std::string &alphabet)
-    : renderer(_renderer), font(_font), startX(_startX), startY(_startY),
-      keyWidth(_keyWidth), keyHeight(_keyHeight), rowSpacing(_rowSpacing), keySpacing(_keySpacing), width(0.0f)
+                                 const std::string &alphabet, TTF_TextEngine *_engine)
+    : startX(_startX), startY(_startY),
+      keyWidth(_keyWidth), keyHeight(_keyHeight),
+      rowSpacing(_rowSpacing), keySpacing(_keySpacing),
+      font(_font), renderer(_renderer),
+      engine(_engine), width(0.0F)
 {
-    rows = createKeyboardRows(alphabet);
+    keyRows = createKeyboardRows(alphabet);
 
     float currentY = startY;
     std::vector<std::string> rowByletters;
 
-    for (const auto &row : rows)
+    for (const auto &row : keyRows)
     {
         rowByletters = splitUtf8String(row);
 
@@ -64,7 +62,7 @@ KeyboardDisplay::KeyboardDisplay(float _startX, float _startY, float _keyWidth, 
         for (auto key : rowByletters)
         {
             keyBoxes.emplace(key, CharBox(currentX, currentY, keyWidth, keyHeight,
-                                          key, CharStatus::UNKNOWN, font, renderer));
+                                          key, CharStatus::UNKNOWN, font, renderer, engine));
 
             keyStatuses[key] = CharStatus::UNKNOWN;
 

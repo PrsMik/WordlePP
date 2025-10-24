@@ -19,19 +19,59 @@ SDL_Color CharBox::getBackgroundColor(CharStatus status)
 
 CharBox::CharBox(float _x, float _y,
                  float _width, float _height,
-                 std::string _chr, CharStatus status,
-                 const TTF_Font *_font, SDL_Renderer *_renderer) : x(_x), y(_y), width(_width), height(_height),
-                                                                   chr(std::move(_chr)),
-                                                                   backgroundColor(getBackgroundColor(status)),
-                                                                   textColor({.r = 255, .g = 255, .b = 255, .a = 255}),
-                                                                   font(_font),
-                                                                   renderer(_renderer)
+                 std::string _chr, CharStatus _status,
+                 const TTF_Font *_font, SDL_Renderer *_renderer, TTF_TextEngine *_engine)
+    : x(_x), y(_y),
+      width(_width), height(_height),
+      status(_status),
+      font(_font),
+      renderer(_renderer),
+      engine(_engine),
+      textColor({.r = 255, .g = 255, .b = 255, .a = 255}),
+      textObject(nullptr)
 {
+    setChar(_chr);
+    setStatus(status);
 }
 
-void CharBox::setStatus(CharStatus status)
+CharBox::~CharBox()
 {
-    backgroundColor = getBackgroundColor(status);
+    if (textObject != nullptr)
+    {
+        TTF_DestroyText(textObject);
+        textObject = nullptr;
+    }
+}
+
+void CharBox::setChar(const std::string &newChar)
+{
+    if (chr == newChar && textObject != nullptr)
+    {
+        return;
+    }
+
+    chr = newChar;
+
+    if (textObject != nullptr)
+    {
+        TTF_DestroyText(textObject);
+        textObject = nullptr;
+    }
+
+    if ((engine != nullptr) && (font != nullptr) && !chr.empty() && chr != " ")
+    {
+        textObject = TTF_CreateText(engine, const_cast<TTF_Font *>(font), chr.c_str(), 0);
+        if (textObject == nullptr)
+        {
+            SDL_Log("TTF_CreateText failed in CharBox::setChar: %s", SDL_GetError());
+        }
+    }
+}
+
+void CharBox::setStatus(CharStatus _status)
+{
+    backgroundColor = getBackgroundColor(_status);
+    status = _status;
 }
 
 void CharBox::render() const
@@ -39,41 +79,67 @@ void CharBox::render() const
     SDL_FRect fRect = {this->x, this->y, this->width, this->height};
 
     SDL_SetRenderDrawColor(renderer, backgroundColor.r, backgroundColor.g, backgroundColor.b, backgroundColor.a);
-
     SDL_RenderFillRect(renderer, &fRect);
 
-    if ((font == nullptr) || chr.empty() || chr == " ")
+    // if no cached text to render
+    if (textObject == nullptr)
     {
         return;
     }
 
-    TTF_TextEngine *engine = TTF_CreateRendererTextEngine(renderer);
-    if (engine == nullptr)
-    {
-        SDL_Log("TTF_CreateRendererTextEngine failed: %s", SDL_GetError());
-        return;
-    }
-
-    TTF_Text *text = TTF_CreateText(engine, const_cast<TTF_Font *>(font), chr.c_str(), 0);
-    if (text == nullptr)
-    {
-        SDL_Log("TTF_CreateText failed in CharBox::render: %s", SDL_GetError());
-        TTF_DestroyRendererTextEngine(engine);
-        return;
-    }
-
-    TTF_SetTextColor(text, textColor.r, textColor.g, textColor.b, textColor.a);
+    TTF_SetTextColor(textObject, textColor.r, textColor.g, textColor.b, textColor.a);
 
     // get text size for alignment
     int textWidth = 0;
     int textHeight = 0;
-    TTF_GetTextSize(text, &textWidth, &textHeight);
+    TTF_GetTextSize(textObject, &textWidth, &textHeight);
 
     float textX = x + ((width - textWidth) / 2.0f);
     float textY = y + ((height - textHeight) / 2.0f);
 
-    TTF_DrawRendererText(text, textX, textY);
+    TTF_DrawRendererText(textObject, textX, textY);
+}
 
-    TTF_DestroyText(text);
-    TTF_DestroyRendererTextEngine(engine);
+CharBox::CharBox(CharBox &&other) noexcept
+    : x(other.x), y(other.y), width(other.width), height(other.height),
+      chr(std::move(other.chr)),
+      status(other.status),
+      font(other.font),
+      renderer(other.renderer),
+      engine(other.engine),
+      backgroundColor(other.backgroundColor),
+      textColor(other.textColor),
+      textObject(other.textObject)
+{
+    other.textObject = nullptr; // set to avoid other's destructor
+}
+
+CharBox &CharBox::operator=(CharBox &&other) noexcept
+{
+    if (this == &other)
+    {
+        return *this;
+    }
+
+    if (textObject != nullptr)
+    {
+        TTF_DestroyText(textObject);
+    }
+
+    x = other.x;
+    y = other.y;
+    width = other.width;
+    height = other.height;
+    chr = std::move(other.chr);
+    backgroundColor = other.backgroundColor;
+    textColor = other.textColor;
+    font = other.font;
+    renderer = other.renderer;
+    engine = other.engine;
+    status = other.status;
+
+    textObject = other.textObject;
+    other.textObject = nullptr;
+
+    return *this;
 }

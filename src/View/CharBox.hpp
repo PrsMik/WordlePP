@@ -20,10 +20,14 @@ private:
     float x, y;
     float width, height;
     std::string chr;
-    SDL_Color backgroundColor;
-    SDL_Color textColor;
+    CharStatus status;
     const TTF_Font *font;
     SDL_Renderer *renderer;
+    TTF_TextEngine *engine;
+
+    SDL_Color backgroundColor;
+    SDL_Color textColor;
+    TTF_Text *textObject;
 
     static SDL_Color getBackgroundColor(CharStatus status);
 
@@ -31,11 +35,21 @@ public:
     CharBox() = default;
 
     CharBox(float boxX, float boxY, float width, float height,
-            std::string chr, CharStatus status, const TTF_Font *font, SDL_Renderer *renderer);
+            std::string chr, CharStatus status, const TTF_Font *font, SDL_Renderer *renderer, TTF_TextEngine *engine);
+
+    ~CharBox();
+
+    void setChar(const std::string &newChar);
 
     void render() const;
 
     void setStatus(CharStatus status);
 
     const std::string &getChar() const { return chr; }
+
+    CharBox(const CharBox &) = delete;
+    CharBox &operator=(const CharBox &) = delete;
+
+    CharBox(CharBox &&other) noexcept;
+    CharBox &operator=(CharBox &&other) noexcept;
 };

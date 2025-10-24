@@ -1,3 +1,4 @@
+#include "GameView.hpp"
 #include "SDL3/SDL_rect.h"
 #include "SDL3/SDL_render.h"
 #include "SDL3_ttf/SDL_ttf.h"
@@ -8,7 +9,6 @@
 
 #include "CharBox.hpp"
 #include "GameLayout.hpp"
-#include "GameView.hpp"
 #include "KeyboardDisplay.hpp"
 #include "WordRow.hpp"
 
@@ -62,12 +62,154 @@ static CharStatus toCharStatus(GameStateDTO::LetterStatus status)
 }
 
 GameView::GameView(SDL_Renderer *_renderer, AssetManager &_assets) : renderer(_renderer), assets(_assets),
-                                                                     _textEngine(TTF_CreateRendererTextEngine(renderer))
+                                                                     lastIsGameFinishedState(false),
+                                                                     layout(nullptr),
+                                                                     c_textEngine(TTF_CreateRendererTextEngine(renderer))
 {
-    if (_textEngine == nullptr)
+    if (c_textEngine == nullptr)
     {
-        std::cerr << "Ошибка: Не удалось создать TTF_TextEngine: " << SDL_GetError() << std::endl;
+        std::cerr << "Ошибка: Не удалось создать TTF_TextEngine: " << SDL_GetError() << "\n";
     }
+}
+
+GameView::~GameView()
+{
+    clearTextCaches();
+    if (c_textEngine != nullptr)
+    {
+        TTF_DestroyRendererTextEngine(c_textEngine);
+    }
+}
+
+void GameView::clearTextCaches()
+{
+    if (c_overlayTitleText != nullptr)
+    {
+        TTF_DestroyText(c_overlayTitleText);
+        c_overlayTitleText = nullptr;
+    }
+    if (c_overlayRestartText != nullptr)
+    {
+        TTF_DestroyText(c_overlayRestartText);
+        c_overlayRestartText = nullptr;
+    }
+    if (c_debugFPSText != nullptr)
+    {
+        TTF_DestroyText(c_debugFPSText);
+        c_debugFPSText = nullptr;
+    }
+    if (c_debugMSText != nullptr)
+    {
+        TTF_DestroyText(c_debugMSText);
+        c_debugMSText = nullptr;
+    }
+
+    // clear text cache and state cache
+    c_cachedGuessCount = -1;
+    c_cachedCurrentInput.clear();
+    c_cachedKeyStatuses.clear();
+    c_cachedFPS = -1;
+    c_cachedMS = -1;
+}
+
+void GameView::rebuildUI(const GameStateDTO &state)
+{
+    // calculate layout
+    layout = std::make_unique<GameLayout>(logicalWidth, logicalHeight, state.targetWordLength, state.maxAttempts);
+    metrics = layout->getMetrics();
+
+    // fonst loading
+    const int CHARBOX_PTSIZE = metrics.fontSizePT;
+    const int KEYBOARD_PTSIZE = metrics.keyboardFontSizePT;
+    const std::string GRID_FONT_NAME = "grid_font";
+    const std::string KEYBOARD_FONT_NAME = "keyboard_font";
+    if (c_cachedGridFontSizePT != CHARBOX_PTSIZE)
+    {
+        assets.loadFonts(GRID_FONT_NAME, DATA_DIR "/fonts/arial.ttf", CHARBOX_PTSIZE);
+        c_cachedGridFontSizePT = CHARBOX_PTSIZE;
+    }
+    if (c_cachedKeyboardFontSizePT != KEYBOARD_PTSIZE)
+    {
+        assets.loadFonts(KEYBOARD_FONT_NAME, DATA_DIR "/fonts/arial.ttf", KEYBOARD_PTSIZE);
+        c_cachedKeyboardFontSizePT = KEYBOARD_PTSIZE;
+    }
+
+    const TTF_Font *gridFont = assets.getFont(GRID_FONT_NAME);
+    const TTF_Font *keyboardFont = assets.getFont(KEYBOARD_FONT_NAME);
+    if (gridFont == nullptr || keyboardFont == nullptr)
+    {
+        return;
+    }
+
+    // clear all cache
+    wordRows.clear();
+    wordRows.reserve(state.maxAttempts);
+    keyboard.reset();
+    clearTextCaches();
+
+    // create rows
+    for (int i = 0; i < state.maxAttempts; ++i)
+    {
+        float yPos = metrics.startY + (i * (metrics.rowHeight + metrics.rowSpacing));
+        wordRows.emplace_back(metrics.startX, yPos,
+                              metrics.boxSize, metrics.rowHeight,
+                              metrics.boxSpacing, state.targetWordLength,
+                              gridFont, renderer, c_textEngine);
+    }
+
+    // create keyboard
+    keyboard = std::make_unique<KeyboardDisplay>(metrics.keyboardCenterX, metrics.keyboardStartY,
+                                                 metrics.keyWidth, metrics.keyHeight,
+                                                 metrics.rowSpacing, metrics.keySpacing,
+                                                 keyboardFont, renderer, state.currentAlphabet,
+                                                 c_textEngine);
+
+    // =============
+    // STATE FILLING
+    // =============
+    int currentRowIndex = 0;
+
+    // guesses history
+    const int HISTORY_COUNT = state.userGuesses.size();
+    for (int i = 0; i < HISTORY_COUNT; ++i)
+    {
+        std::vector<CharStatus> statuses;
+        const auto &guess = state.userGuessesStatuses[i];
+        statuses.reserve(guess.size());
+        for (const auto &chr : guess)
+        {
+            statuses.push_back(toCharStatus(chr.second));
+        }
+        statuses.resize(state.targetWordLength, CharStatus::ABSENT);
+        wordRows[i].setStatuses(state.userGuesses[i], statuses);
+        currentRowIndex = i + 1;
+    }
+    c_cachedGuessCount = currentRowIndex;
+
+    // current input
+    if (currentRowIndex < state.maxAttempts)
+    {
+        c_cachedCurrentInput = state.getCurrentInputString();
+        wordRows[currentRowIndex].setWord(c_cachedCurrentInput, CharStatus::UNKNOWN);
+        currentRowIndex++;
+    }
+
+    // empty rows
+    for (int i = currentRowIndex; i < state.maxAttempts; ++i)
+    {
+        wordRows[i].setWord(" ", CharStatus::UNKNOWN);
+    }
+
+    // keyboard
+    for (const auto &[key, status] : state.currentAlphabetStatus)
+    {
+        keyboard->updateStatus(key, toCharStatus(status));
+        c_cachedKeyStatuses[key] = status;
+    }
+
+    // clear overlay cache
+    c_cachedTitleFontSizePT = 0;
+    c_cachedRestartFontSizePT = 0;
 }
 
 void GameView::render(const GameStateDTO &state)
@@ -75,176 +217,110 @@ void GameView::render(const GameStateDTO &state)
     SDL_RendererLogicalPresentation mode{SDL_LOGICAL_PRESENTATION_LETTERBOX};
     SDL_GetRenderLogicalPresentation(renderer, &logicalWidth, &logicalHeight, &mode);
 
-    if (logicalWidth != _cachedLogicalWidth || logicalHeight != _cachedLogicalHeight)
+    if (logicalWidth != c_cachedLogicalWidth || logicalHeight != c_cachedLogicalHeight || !layout ||
+        lastIsGameFinishedState != state.isGameFinished)
     {
-        _cachedLogicalWidth = logicalWidth;
-        _cachedLogicalHeight = logicalHeight;
-
-        _cachedTitleFontSizePT = 0;
-        _cachedRestartFontSizePT = 0;
-
-        _cachedGridFontSizePT = 0;
-        _cachedKeyboardFontSizePT = 0;
+        c_cachedLogicalWidth = logicalWidth;
+        c_cachedLogicalHeight = logicalHeight;
+        lastIsGameFinishedState = state.isGameFinished;
+        rebuildUI(state);
     }
 
-    GameLayout layout(logicalWidth, logicalHeight, state.targetWordLength, state.maxAttempts);
-    LayoutMetrics metrics = layout.getMetrics();
-
-    const int WORD_LENGTH = state.targetWordLength;
-    const int MAX_GUESSES = state.maxAttempts;
-
-    const float BOX_SIZE = metrics.boxSize;
-    const float BOX_HEIGHT = metrics.rowHeight;
-    const float BOX_SPACING = metrics.boxSpacing;
-    const float GRID_ROW_SPACING = metrics.rowSpacing;
-
-    const float GRID_ROW_STEP_Y = BOX_HEIGHT + GRID_ROW_SPACING;
-
-    const float START_X = metrics.startX;
-    const float START_Y = metrics.startY;
-
-    const float KEYBOARD_START_Y = metrics.keyboardStartY;
-    const float KEY_WIDTH = metrics.keyWidth;
-    const float KEY_HEIGHT = metrics.keyHeight;
-    const float KEY_SPACING = metrics.keySpacing;
-    const float ROW_SPACING = metrics.rowSpacing;
-    const float KEYBOARD_CENTER_X = metrics.keyboardCenterX;
-
-    const int CHARBOX_PTSIZE = metrics.fontSizePT;
-    const int KEYBOARD_PTSIZE = metrics.keyboardFontSizePT;
-    const std::string FONT_NAME = "arial";
-    const std::string GRID_FONT_NAME = "grid_font";
-    const std::string KEYBOARD_FONT_NAME = "keyboard_font";
-
-    if (_cachedGridFontSizePT != CHARBOX_PTSIZE)
+    if (wordRows.empty() || !keyboard)
     {
-        assets.loadFonts(GRID_FONT_NAME, DATA_DIR "/fonts/arial.ttf", CHARBOX_PTSIZE);
-        _cachedGridFontSizePT = CHARBOX_PTSIZE;
-    }
-
-    if (_cachedKeyboardFontSizePT != KEYBOARD_PTSIZE)
-    {
-        assets.loadFonts(KEYBOARD_FONT_NAME, DATA_DIR "/fonts/arial.ttf", KEYBOARD_PTSIZE);
-        _cachedKeyboardFontSizePT = KEYBOARD_PTSIZE;
-    }
-
-    const TTF_Font *gridFont = assets.getFont(GRID_FONT_NAME);
-    const TTF_Font *keyboardFont = assets.getFont(KEYBOARD_FONT_NAME);
-    if (gridFont == nullptr || keyboardFont == nullptr)
-    {
-        SDL_Log("Font not loaded. Cannot render.");
+        SDL_Log("UI not initialized, skipping render.");
         return;
     }
 
     SDL_SetRenderDrawColor(renderer, 18, 18, 19, 255);
     SDL_RenderClear(renderer);
 
-    std::vector<WordRow> wordRows;
-    int currentRowIndex = 0;
+    // REDNDER ONLY DELTA WITH PREVIOUS FRAME
 
-    // render history
-    const int HISTORY_COUNT = state.userGuesses.size();
-    for (int i = 0; i < HISTORY_COUNT; ++i)
+    // guess history
+    int newGuessCount = state.userGuesses.size();
+    if (newGuessCount > c_cachedGuessCount)
     {
-        float yPos = START_Y + (i * GRID_ROW_STEP_Y);
-
-        wordRows.emplace_back(START_X, yPos, BOX_SIZE, BOX_HEIGHT,
-                              BOX_SPACING, WORD_LENGTH, gridFont, renderer);
-
-        if (!state.userGuessesStatuses.empty())
+        int rowIndexToUpdate = c_cachedGuessCount;
+        const auto &guessStatus = state.userGuessesStatuses[rowIndexToUpdate];
+        std::vector<CharStatus> statuses;
+        statuses.reserve(guessStatus.size());
+        for (const auto &chr : guessStatus)
         {
-            std::vector<CharStatus> statuses;
-            const auto &guess = state.userGuessesStatuses[i];
-            for (const auto &chr : guess)
-            {
-                CharStatus status = toCharStatus(chr.second);
-                statuses.push_back(status);
-            }
-            statuses.resize(WORD_LENGTH, CharStatus::ABSENT);
-
-            wordRows.back().setStatuses(state.userGuesses[i], statuses);
+            statuses.push_back(toCharStatus(chr.second));
         }
-        currentRowIndex = i + 1;
+        statuses.resize(state.targetWordLength, CharStatus::ABSENT);
+
+        wordRows[rowIndexToUpdate].setStatuses(state.userGuesses[rowIndexToUpdate], statuses);
+
+        c_cachedGuessCount = newGuessCount;
     }
 
-    // render current input
-    if (currentRowIndex < MAX_GUESSES)
+    // current input
+    const std::string &newCurrentInput = state.getCurrentInputString();
+    if (newCurrentInput != c_cachedCurrentInput && c_cachedGuessCount < state.maxAttempts)
     {
-        float yPos = START_Y + (currentRowIndex * GRID_ROW_STEP_Y);
-
-        wordRows.emplace_back(START_X, yPos, BOX_SIZE,
-                              BOX_HEIGHT, BOX_SPACING, WORD_LENGTH, gridFont, renderer);
-
-        wordRows.back().setWord(state.getCurrentInputString(), CharStatus::UNKNOWN);
-
-        currentRowIndex++;
+        wordRows[c_cachedGuessCount].setWord(newCurrentInput, CharStatus::UNKNOWN);
+        c_cachedCurrentInput = newCurrentInput;
     }
 
-    // render unused attempts
-    for (int i = currentRowIndex; i < MAX_GUESSES; ++i)
-    {
-        float yPos = START_Y + (i * GRID_ROW_STEP_Y);
-
-        wordRows.emplace_back(START_X, yPos, BOX_SIZE,
-                              BOX_HEIGHT, BOX_SPACING, WORD_LENGTH, gridFont, renderer);
-    }
-
-    // render all rows
+    // ALWAYS RENDER ALL ROWS
     for (auto &row : wordRows)
     {
         row.render();
     }
 
-    // render keyboard
-    KeyboardDisplay keyboard(KEYBOARD_CENTER_X, KEYBOARD_START_Y,
-                             KEY_WIDTH, KEY_HEIGHT, ROW_SPACING, KEY_SPACING,
-                             keyboardFont, renderer, state.currentAlphabet);
-
-    // set keys statuses in keyboard
-    for (const auto &[key, status] : state.currentAlphabetStatus)
+    // UPDATE KEYBOARD WITH DELTA
+    for (const auto &[key, newStatus] : state.currentAlphabetStatus)
     {
-        keyboard.updateStatus(key, toCharStatus(status));
+        if (!c_cachedKeyStatuses.contains(key) || c_cachedKeyStatuses[key] != newStatus)
+        {
+            keyboard->updateStatus(key, toCharStatus(newStatus));
+            c_cachedKeyStatuses[key] = newStatus;
+        }
     }
 
-    keyboard.render();
+    // ALWAYS RENDER KEYBOARD
+    keyboard->render();
 
+    // OVERLAY RENDER
     if (state.isGameFinished)
     {
-        renderFinishOverlay(state, logicalWidth, logicalHeight, metrics);
+        renderFinishOverlay(state, metrics);
     }
 }
 
-void GameView::renderText(const std::string &text, int x, int y, TTF_Font *font, const SDL_Color &color)
+void GameView::renderText(const std::string &text, int x, int y, TTF_Font *font, const SDL_Color &color, bool center)
 {
-    if ((font == nullptr) || text.empty())
+    if ((font == nullptr) || text.empty() || c_textEngine == nullptr)
     {
         return;
     }
 
-    SDL_Surface *surface = TTF_RenderText_Blended(font, text.c_str(), 0, color);
-    if (surface == nullptr)
+    TTF_Text *textObj = TTF_CreateText(c_textEngine, font, text.c_str(), 0);
+    if (textObj == nullptr)
     {
-        SDL_Log("TTF_RenderText_Blended Error: %s", SDL_GetError());
+        SDL_Log("TTF_CreateText failed in renderText: %s", SDL_GetError());
         return;
     }
 
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (texture == nullptr)
+    TTF_SetTextColor(textObj, color.r, color.g, color.b, color.a);
+
+    int textWidth = 0;
+    int textHeight = 0;
+    TTF_GetTextSize(textObj, &textWidth, &textHeight);
+
+    auto textX = static_cast<float>(x);
+    auto textY = static_cast<float>(y);
+
+    if (center)
     {
-        SDL_Log("SDL_CreateTextureFromSurface Error: %s", SDL_GetError());
-        SDL_DestroySurface(surface);
-        return;
+        textX = x - (textWidth / 2.0F);
+        textY = y - (textHeight / 2.0F);
     }
 
-    SDL_FRect dstRect;
-    dstRect.x = static_cast<float>(x);
-    dstRect.y = static_cast<float>(y);
-    dstRect.w = static_cast<float>(surface->w);
-    dstRect.h = static_cast<float>(surface->h);
-
-    SDL_RenderTexture(renderer, texture, nullptr, &dstRect);
-    SDL_DestroyTexture(texture);
-    SDL_DestroySurface(surface);
+    TTF_DrawRendererText(textObj, textX, textY);
+    TTF_DestroyText(textObj);
 }
 
 void GameView::renderDebugInfo(int fps, int msPerFrame)
@@ -255,15 +331,36 @@ void GameView::renderDebugInfo(int fps, int msPerFrame)
     const SDL_Color TEXT_COLOR = {255, 255, 0, 255};
 
     assets.loadFonts(DEBUG_FONT_NAME, FONT_PATH, DEBUG_FONT_PTSIZE);
-    TTF_Font *debugFont = const_cast<TTF_Font *>(assets.getFont(DEBUG_FONT_NAME));
-
-    if (debugFont == nullptr)
+    auto *debugFont = const_cast<TTF_Font *>(assets.getFont(DEBUG_FONT_NAME));
+    if (debugFont == nullptr || c_textEngine == nullptr)
     {
         return;
     }
 
-    std::string fpsText = "FPS: " + std::to_string(fps);
-    std::string msText = "Frame: " + std::to_string(msPerFrame) + " ms";
+    if (c_debugFPSText == nullptr)
+    {
+        c_debugFPSText = TTF_CreateText(c_textEngine, debugFont, "FPS: ...", 0);
+        TTF_SetTextColor(c_debugFPSText, TEXT_COLOR.r, TEXT_COLOR.g, TEXT_COLOR.b, TEXT_COLOR.a);
+    }
+    if (c_debugMSText == nullptr)
+    {
+        c_debugMSText = TTF_CreateText(c_textEngine, debugFont, "Frame: ...", 0);
+        TTF_SetTextColor(c_debugMSText, TEXT_COLOR.r, TEXT_COLOR.g, TEXT_COLOR.b, TEXT_COLOR.a);
+    }
+
+    if (fps != c_cachedFPS)
+    {
+        std::string fpsText = "FPS: " + std::to_string(fps);
+        TTF_SetTextString(c_debugFPSText, fpsText.c_str(), 0);
+        c_cachedFPS = fps;
+    }
+
+    if (msPerFrame != c_cachedMS)
+    {
+        std::string msText = "Frame: " + std::to_string(msPerFrame) + " ms";
+        TTF_SetTextString(c_debugMSText, msText.c_str(), 0);
+        c_cachedMS = msPerFrame;
+    }
 
     const int MARGIN_X = 10;
     const int MARGIN_Y = 10;
@@ -271,21 +368,25 @@ void GameView::renderDebugInfo(int fps, int msPerFrame)
 
     int fpsW = 0;
     int fspH = 0;
-    TTF_GetStringSize(debugFont, fpsText.c_str(), 0, &fpsW, &fspH);
+    TTF_GetTextSize(c_debugFPSText, &fpsW, &fspH);
 
-    renderText(fpsText, MARGIN_X, MARGIN_Y, debugFont, TEXT_COLOR);
-
-    renderText(msText, MARGIN_X, MARGIN_Y + fspH + LINE_SPACING, debugFont, TEXT_COLOR);
+    TTF_DrawRendererText(c_debugFPSText, (float)MARGIN_X, (float)MARGIN_Y);
+    TTF_DrawRendererText(c_debugMSText, (float)MARGIN_X, (float)MARGIN_Y + fspH + LINE_SPACING);
 }
 
-void GameView::renderFinishOverlay(const GameStateDTO &state, int logicalWidth, int logicalHeight, const LayoutMetrics &metrics)
+void GameView::renderFinishOverlay(const GameStateDTO &state, const LayoutMetrics &metrics)
 {
-    if (_cachedTitleFontSizePT == 0 || _cachedRestartFontSizePT == 0 || _cachedTitleMessageSize != state.finalMessage.size())
+    if (c_cachedTitleFontSizePT == 0 || c_cachedRestartFontSizePT == 0 || c_cachedTitleMessage != state.finalMessage)
     {
+        c_cachedTitleMessage = state.finalMessage;
         calculateAndCacheOverlayFontSizes(state, metrics);
     }
 
-    // background blur
+    if (c_overlayTitleText == nullptr || c_overlayRestartText == nullptr)
+    {
+        return;
+    }
+
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
     SDL_RenderFillRect(renderer, nullptr);
@@ -295,93 +396,76 @@ void GameView::renderFinishOverlay(const GameStateDTO &state, int logicalWidth, 
     const float BOX_X = metrics.overlayBoxX;
     const float BOX_Y = metrics.overlayBoxY;
 
-    // render message rect
+    // render message box
     SDL_FRect messageBoxRect = {BOX_X, BOX_Y, BOX_WIDTH, BOX_HEIGHT};
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderFillRect(renderer, &messageBoxRect);
 
     SDL_Color textColor = {0, 0, 0, 255};
+    TTF_SetTextColor(c_overlayTitleText, textColor.r, textColor.g, textColor.b, textColor.a);
+    TTF_SetTextColor(c_overlayRestartText, textColor.r, textColor.g, textColor.b, textColor.a);
 
-    const int CALCULATED_TITLE_FONT_SIZE_PT = _cachedTitleFontSizePT;
-    const std::string OVERLAY_FONT_NAME = "overlay_font";
-
-    assets.setFontSize(OVERLAY_FONT_NAME, (float)CALCULATED_TITLE_FONT_SIZE_PT);
-    TTF_Font *titleFont = const_cast<TTF_Font *>(assets.getFont(OVERLAY_FONT_NAME));
-
-    // get text size for alignment
     int finalTitleW = 0;
     int finalTitleH = 0;
-    if (titleFont != nullptr)
-    {
-        TTF_GetStringSize(titleFont, state.finalMessage.c_str(), 0, &finalTitleW, &finalTitleH);
-    }
+    TTF_GetTextSize(c_overlayTitleText, &finalTitleW, &finalTitleH);
 
-    // render game end message
+    // alignment
     const float DESIRED_TITLE_HEIGHT = metrics.overlayTitleAreaHeight;
-    renderText(state.finalMessage,
-               (int)(BOX_X + ((BOX_WIDTH - finalTitleW) / 2)),
-               (int)(BOX_Y + ((DESIRED_TITLE_HEIGHT - finalTitleH) / 2.0f)),
-               titleFont, textColor);
+    float titleX = BOX_X + ((BOX_WIDTH - finalTitleW) / 2.0f);
+    float titleY = BOX_Y + ((DESIRED_TITLE_HEIGHT - finalTitleH) / 2.0f);
 
-    const std::string RESTART_MSG = "Нажмите ENTER для новой игры";
-    const int CALCULATED_RESTART_FONT_SIZE_PT = _cachedRestartFontSizePT;
+    TTF_DrawRendererText(c_overlayTitleText, titleX, titleY);
 
-    assets.setFontSize(OVERLAY_FONT_NAME, (float)CALCULATED_RESTART_FONT_SIZE_PT);
-    TTF_Font *restartFont = const_cast<TTF_Font *>(assets.getFont(OVERLAY_FONT_NAME));
-
-    // get text size for alignment
     int finalRestartW = 0;
     int finalRestartH = 0;
-    if (restartFont != nullptr)
-    {
-        TTF_GetStringSize(restartFont, RESTART_MSG.c_str(), 0, &finalRestartW, &finalRestartH);
-    }
+    TTF_GetTextSize(c_overlayRestartText, &finalRestartW, &finalRestartH);
 
+    // alignment
     const float RESTART_Y_POSITION = metrics.overlayRestartYPosition;
+    float restartX = BOX_X + ((BOX_WIDTH - finalRestartW) / 2.0f);
+    float restartY = RESTART_Y_POSITION - (finalRestartH / 2.0f);
 
-    // render restart instruction
-    renderText(RESTART_MSG,
-               (int)(BOX_X + ((BOX_WIDTH - finalRestartW) / 2)),
-               (int)(RESTART_Y_POSITION - (finalRestartH / 2.0f)),
-               restartFont, textColor);
+    TTF_DrawRendererText(c_overlayRestartText, restartX, restartY);
 }
 
 void GameView::calculateAndCacheOverlayFontSizes(const GameStateDTO &state, const LayoutMetrics &metrics)
 {
-    const int MAX_REASONABLE_PTSIZE = 256;
+    if (c_overlayTitleText != nullptr)
+    {
+        TTF_DestroyText(c_overlayTitleText);
+    }
+    if (c_overlayRestartText != nullptr)
+    {
+        TTF_DestroyText(c_overlayRestartText);
+    }
+    c_overlayTitleText = nullptr;
+    c_overlayRestartText = nullptr;
 
+    // fonts constants
+    const int MAX_REASONABLE_PTSIZE = 256;
     const int MIN_FONT_SIZE = 10;
     const int MIN_RESTART_FONT_PTSIZE = 12;
-
     const std::string OVERLAY_FONT_NAME = "overlay_font";
+    const std::string RESTART_FONT_NAME = "restart_font";
     const std::string RESTART_MSG = "Нажмите ENTER для новой игры";
 
-    if (_textEngine == nullptr)
+    if (c_textEngine == nullptr)
     {
-        _cachedTitleFontSizePT = 0;
-        _cachedRestartFontSizePT = 0;
         return;
     }
 
+    // loading fonts
     assets.loadFonts(OVERLAY_FONT_NAME, DATA_DIR "/fonts/arial.ttf", MAX_REASONABLE_PTSIZE);
-    TTF_Font *overlayFont = const_cast<TTF_Font *>(assets.getFont(OVERLAY_FONT_NAME));
-
+    assets.loadFonts(RESTART_FONT_NAME, DATA_DIR "/fonts/arial.ttf", MAX_REASONABLE_PTSIZE);
+    auto *overlayFont = const_cast<TTF_Font *>(assets.getFont(OVERLAY_FONT_NAME));
+    auto *restartFont = const_cast<TTF_Font *>(assets.getFont(RESTART_FONT_NAME));
     if (overlayFont == nullptr)
     {
-        _cachedTitleFontSizePT = 0;
-        _cachedRestartFontSizePT = 0;
         return;
     }
 
-    std::string titleMessage = state.finalMessage;
-    if (_cachedTitleMessageSize == 0)
-    {
-        titleMessage = state.LOSE_MESSAGE.length() > state.WIN_MESSAGE.length() ? state.LOSE_MESSAGE : state.WIN_MESSAGE;
-    }
-    _cachedTitleMessageSize = titleMessage.size();
-
-    TTF_Text *titleTextObject = TTF_CreateText(_textEngine, overlayFont, titleMessage.c_str(), 0);
-    TTF_Text *restartTextObject = TTF_CreateText(_textEngine, overlayFont, RESTART_MSG.c_str(), 0);
+    TTF_Text *titleTextObject = TTF_CreateText(c_textEngine, overlayFont, c_cachedTitleMessage.c_str(), 0);
+    TTF_Text *restartTextObject = TTF_CreateText(c_textEngine, restartFont, RESTART_MSG.c_str(), 0);
 
     if (titleTextObject == nullptr || restartTextObject == nullptr)
     {
@@ -393,24 +477,29 @@ void GameView::calculateAndCacheOverlayFontSizes(const GameStateDTO &state, cons
         {
             TTF_DestroyText(restartTextObject);
         }
-        _cachedTitleFontSizePT = 0;
-        _cachedRestartFontSizePT = 0;
         return;
     }
 
-    // calculate game end text size with binary search
-    _cachedTitleFontSizePT = findOptimalFontSize(titleTextObject, OVERLAY_FONT_NAME, assets,
-                                                 MIN_FONT_SIZE, MAX_REASONABLE_PTSIZE,
-                                                 metrics.overlayTitleAreaWidth, metrics.overlayTitleAreaHeight);
+    c_cachedTitleFontSizePT = findOptimalFontSize(titleTextObject, OVERLAY_FONT_NAME, assets,
+                                                  MIN_FONT_SIZE, MAX_REASONABLE_PTSIZE,
+                                                  metrics.overlayTitleAreaWidth,
+                                                  metrics.overlayTitleAreaHeight);
 
-    // calculate if only not cached
-    if (_cachedRestartFontSizePT == 0)
+    if (c_cachedRestartFontSizePT == 0)
     {
-        _cachedRestartFontSizePT = findOptimalFontSize(restartTextObject, OVERLAY_FONT_NAME, assets,
-                                                       MIN_RESTART_FONT_PTSIZE, MAX_REASONABLE_PTSIZE,
-                                                       metrics.overlayRestartAreaWidth, metrics.overlayRestartAreaHeight);
+        c_cachedRestartFontSizePT = findOptimalFontSize(restartTextObject, RESTART_FONT_NAME, assets,
+                                                        MIN_RESTART_FONT_PTSIZE, MAX_REASONABLE_PTSIZE,
+                                                        metrics.overlayRestartAreaWidth,
+                                                        metrics.overlayRestartAreaHeight);
     }
 
     TTF_DestroyText(titleTextObject);
     TTF_DestroyText(restartTextObject);
+
+    // caching
+    assets.setFontSize(OVERLAY_FONT_NAME, (float)c_cachedTitleFontSizePT);
+    c_overlayTitleText = TTF_CreateText(c_textEngine, overlayFont, c_cachedTitleMessage.c_str(), 0);
+
+    assets.setFontSize(RESTART_FONT_NAME, (float)c_cachedRestartFontSizePT);
+    c_overlayRestartText = TTF_CreateText(c_textEngine, restartFont, RESTART_MSG.c_str(), 0);
 }
