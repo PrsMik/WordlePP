@@ -48,10 +48,16 @@ configure_file(
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Предполагая, что вы собираете 64-битный проект (судя по пути к clang-cl.exe)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE "_AMD64_") 
-    # Или, если для x86: target_compile_definitions(${PROJECT_NAME} PRIVATE "_X86_")
+if(WIN32)
+    # Определяем макросы архитектуры, которые ожидают некоторые библиотеки
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8) # 64-битная архитектура
+        target_compile_definitions(${PROJECT_NAME} PRIVATE "_AMD64_") 
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 4) # 32-битная архитектура
+        target_compile_definitions(${PROJECT_NAME} PRIVATE "_X86_")
+    endif()
+    
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    endif()
 endif()
 
 # Add the directory containing the generated header to your include paths
