@@ -34,6 +34,7 @@ void SDLEngine::init(const std::string &title, int width, int height)
         inputHandler = std::make_unique<InputHandler>();
         mainWindow.reset(windowPtr);
         renderer.reset(rendererPtr);
+        SDL_SetRenderVSync(renderer.get(), SDL_RENDERER_VSYNC_DISABLED);
         SDL_SetRenderLogicalPresentation(renderer.get(), 1080, 1920,
                                          SDL_RendererLogicalPresentation::SDL_LOGICAL_PRESENTATION_LETTERBOX);
         manager = std::make_unique<AssetManager>(renderer.get());

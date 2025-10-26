@@ -34,8 +34,8 @@ struct GameStateDTO
     std::string errorMessage;
     std::string finalMessage;
 
-    const std::string WIN_MESSAGE = "ПОБЕДА!";
-    const std::string LOSE_MESSAGE;
+    std::string WIN_MESSAGE = "ПОБЕДА!";
+    std::string LOSE_MESSAGE;
 
     GameStateDTO(int _maxAttempts, std::string _currentAlphabet,
                  std::string _wordToGuess) : isGameFinished(false), maxAttempts(_maxAttempts),
@@ -64,7 +64,9 @@ struct GameStateDTO
                                                   lastGuessStatus(std::move(other.lastGuessStatus)),
                                                   userGuessesStatuses(std::move(other.userGuessesStatuses)),
                                                   errorMessage(std::move(other.errorMessage)),
-                                                  finalMessage(std::move(other.finalMessage))
+                                                  finalMessage(std::move(other.finalMessage)),
+                                                  WIN_MESSAGE(other.WIN_MESSAGE),
+                                                  LOSE_MESSAGE(other.LOSE_MESSAGE)
     {
     }
 
@@ -89,6 +91,9 @@ struct GameStateDTO
 
             std::swap(errorMessage, other.errorMessage);
             std::swap(finalMessage, other.finalMessage);
+
+            std::swap(WIN_MESSAGE, other.WIN_MESSAGE);
+            std::swap(LOSE_MESSAGE, other.LOSE_MESSAGE);
         }
         return *this;
     }

@@ -1,5 +1,6 @@
 #include "KeyboardDisplay.hpp"
-#include "Utils.hpp"
+#include "UTF8Utils.hpp"
+#include "ViewUtils.hpp"
 #include <algorithm>
 #include <vector>
 
@@ -32,16 +33,16 @@ std::vector<std::string> createKeyboardRows(const std::string &alphabet)
     return newRows;
 }
 
-KeyboardDisplay::KeyboardDisplay(float _startX, float _startY, float _keyWidth, float _keyHeight,
-                                 float _rowSpacing, float _keySpacing, const TTF_Font *_font, SDL_Renderer *_renderer,
-                                 const std::string &alphabet, TTF_TextEngine *_engine)
-    : startX(_startX), startY(_startY),
-      keyWidth(_keyWidth), keyHeight(_keyHeight),
-      rowSpacing(_rowSpacing), keySpacing(_keySpacing),
+KeyboardDisplay::KeyboardDisplay(SDL_Renderer *_renderer, TTF_TextEngine *_engine, const LayoutMetrics &metrics,
+                                 const TTF_Font *_font, const GameStateDTO &state)
+    : startX(metrics.keyboardCenterX), startY(metrics.keyboardStartY),
+      keyWidth(metrics.keyWidth), keyHeight(metrics.keyHeight),
+      rowSpacing(metrics.rowSpacing), keySpacing(metrics.keySpacing),
       font(_font), renderer(_renderer),
       engine(_engine), width(0.0F)
 {
-    keyRows = createKeyboardRows(alphabet);
+    // STATE FILLING
+    keyRows = createKeyboardRows(state.currentAlphabet);
 
     float currentY = startY;
     std::vector<std::string> rowByletters;
@@ -71,6 +72,11 @@ KeyboardDisplay::KeyboardDisplay(float _startX, float _startY, float _keyWidth, 
         currentY += keyHeight + rowSpacing;
     }
     height = currentY - startY + rowSpacing;
+
+    for (const auto &[key, status] : state.currentAlphabetStatus)
+    {
+        updateStatus(key, toCharStatus(status));
+    }
 }
 
 void KeyboardDisplay::updateStatus(std::string key, CharStatus status)
@@ -87,8 +93,18 @@ void KeyboardDisplay::updateStatus(std::string key, CharStatus status)
     }
 }
 
-void KeyboardDisplay::render()
+void KeyboardDisplay::render(const std::map<std::string, GameStateDTO::LetterStatus> &newKeyStatuses)
 {
+    // delta update
+    for (const auto &[key, newDTOStatus] : newKeyStatuses)
+    {
+        if (!c_cachedKeyStatuses.contains(key) || c_cachedKeyStatuses[key] != newDTOStatus)
+        {
+            updateStatus(key, toCharStatus(newDTOStatus));
+            c_cachedKeyStatuses[key] = newDTOStatus;
+        }
+    }
+
     for (auto const &[key, box] : keyBoxes)
     {
         box.render();

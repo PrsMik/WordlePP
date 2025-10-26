@@ -94,8 +94,8 @@ void CharBox::render() const
     int textHeight = 0;
     TTF_GetTextSize(textObject, &textWidth, &textHeight);
 
-    float textX = x + ((width - textWidth) / 2.0f);
-    float textY = y + ((height - textHeight) / 2.0f);
+    float textX = x + ((width - textWidth) / 2.0F);
+    float textY = y + ((height - textHeight) / 2.0F);
 
     TTF_DrawRendererText(textObject, textX, textY);
 }

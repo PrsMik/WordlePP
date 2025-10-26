@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10.0)
+cmake_minimum_required(VERSION 3.30.0)
 project(Wordle++ VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -24,18 +24,18 @@ add_subdirectory(lib/SDL_image EXCLUDE_FROM_ALL)
 # This assumes the SDL_ttf source is available in lib/SDL_ttf
 add_subdirectory(lib/SDL_mixer EXCLUDE_FROM_ALL)
 
-set(SOURCES main.cpp
-    src/Controller/InputHandler.cpp
-    src/Controller/SDLEngine.cpp
-    src/Model/Dictionary/Dictionary.cpp
-    src/Model/WordleModel.cpp
-    src/View/AssetManager.cpp
-    src/View/GameView.cpp
-    src/View/CharBox.cpp
-    src/View/WordRow.cpp
-    src/View/KeyboardDisplay.cpp
-    src/View/GameLayout.cpp
-    )
+file(GLOB CONTROLLER_SOURCES CONFIGURE_DEPENDS "src/Controller/*.cpp")
+file(GLOB MODEL_DICTIONARY_SOURCES CONFIGURE_DEPENDS  "src/Model/Dictionary/*.cpp")
+file(GLOB MODEL_SOURCES CONFIGURE_DEPENDS "src/Model/*.cpp")
+file(GLOB VIEW_SOURCES CONFIGURE_DEPENDS "src/View/*.cpp")
+
+set(SOURCES
+    main.cpp
+    ${CONTROLLER_SOURCES}
+    ${MODEL_DICTIONARY_SOURCES}
+    ${MODEL_SOURCES}
+    ${VIEW_SOURCES}
+)
 
 set(DATA_DIR "${PROJECT_SOURCE_DIR}/data")
 
@@ -46,6 +46,7 @@ configure_file(
     @ONLY
 )
 
+# Объявляем исполняемый файл
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 if(WIN32)
